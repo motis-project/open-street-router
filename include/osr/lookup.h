@@ -2,6 +2,7 @@
 
 #include "osr/ways.h"
 
+#include "utl/cflow.h"
 #include "utl/helpers/algorithm.h"
 #include "utl/pairwise.h"
 
@@ -38,8 +39,6 @@ struct way_candidate {
   node_candidate left_{}, right_{};
 };
 
-enum class cflow { kContinue, kBreak };
-
 template <typename T, typename Collection, typename Fn>
 void till_the_end(T const& start,
                   Collection const& c,
@@ -47,14 +46,14 @@ void till_the_end(T const& start,
                   Fn&& fn) {
   if (dir == direction::kForward) {
     for (auto i = start; i != c.size(); ++i) {
-      if (fn(c[i]) == cflow::kBreak) {
+      if (fn(c[i]) == utl::cflow::kBreak) {
         break;
       }
     }
   } else {
     for (auto j = 0U; j <= start; ++j) {
       auto i = start - j;
-      if (fn(c[i]) == cflow::kBreak) {
+      if (fn(c[i]) == utl::cflow::kBreak) {
         break;
       }
     }
@@ -93,22 +92,41 @@ struct lookup {
   ~lookup() { rtree_free(rtree_); }
 
   template <typename Profile>
-  match_t match(location const& query,
-                bool const reverse,
-                direction const search_dir) const {
+  match_t get_way_candidates(location const& query,
+                             bool const reverse,
+                             direction const search_dir,
+                             double const max_match_distance,
+                             bitvec<node_idx_t> const* blocked) const {
     auto way_candidates = std::vector<way_candidate>{};
     find(query.pos_, [&](way_idx_t const way) {
       auto d = distance_to_way(query.pos_, ways_.way_polylines_[way]);
-      if (d.dist_to_way_ < Profile::kMaxMatchDistance) {
+      if (d.dist_to_way_ < max_match_distance) {
         auto& wc = way_candidates.emplace_back(std::move(d));
         wc.way_ = way;
-        wc.left_ = find_next_node<Profile>(wc, query, direction::kBackward,
-                                           query.lvl_, reverse, search_dir);
-        wc.right_ = find_next_node<Profile>(wc, query, direction::kForward,
-                                            query.lvl_, reverse, search_dir);
+        wc.left_ =
+            find_next_node<Profile>(wc, query, direction::kBackward, query.lvl_,
+                                    reverse, search_dir, blocked);
+        wc.right_ =
+            find_next_node<Profile>(wc, query, direction::kForward, query.lvl_,
+                                    reverse, search_dir, blocked);
       }
     });
     utl::sort(way_candidates);
+    return way_candidates;
+  }
+
+  template <typename Profile>
+  match_t match(location const& query,
+                bool const reverse,
+                direction const search_dir,
+                double const max_match_distance,
+                bitvec<node_idx_t> const* blocked) const {
+    auto way_candidates = get_way_candidates<Profile>(
+        query, reverse, search_dir, max_match_distance, blocked);
+    if (way_candidates.empty()) {
+      way_candidates = get_way_candidates<Profile>(
+          query, reverse, search_dir, max_match_distance * 2U, blocked);
+    }
     return way_candidates;
   }
 
@@ -118,7 +136,8 @@ struct lookup {
                                 direction const dir,
                                 level_t const lvl,
                                 bool const reverse,
-                                direction const search_dir) const {
+                                direction const search_dir,
+                                bitvec<node_idx_t> const* blocked) const {
     auto const way_prop = ways_.r_->way_properties_[wc.way_];
     auto const edge_dir = reverse ? opposite(dir) : dir;
     auto const way_cost =
@@ -151,12 +170,13 @@ struct lookup {
                    c.path_.push_back(pos);
 
                    auto const way_node = ways_.find_node_idx(osm_node_idx);
-                   if (way_node.has_value()) {
+                   if (way_node.has_value() &&
+                       (blocked == nullptr || !blocked->test(*way_node))) {
                      c.node_ = *way_node;
-                     return cflow::kBreak;
+                     return utl::cflow::kBreak;
                    }
 
-                   return cflow::kContinue;
+                   return utl::cflow::kContinue;
                  });
 
     if (reverse) {
@@ -174,10 +194,10 @@ struct lookup {
 
   template <typename Fn>
   void find(geo::latlng const& a, geo::latlng const& b, Fn&& fn) const {
-    auto const min = std::array<double, 2U>{std::min(a.lng_, b.lng_),
-                                            std::min(a.lat_, b.lat_)};
-    auto const max = std::array<double, 2U>{std::max(a.lng_, b.lng_),
-                                            std::max(a.lat_, b.lat_)};
+    auto const min =
+        std::array{std::min(a.lng_, b.lng_), std::min(a.lat_, b.lat_)};
+    auto const max =
+        std::array{std::max(a.lng_, b.lng_), std::max(a.lat_, b.lat_)};
     rtree_search(
         rtree_, min.data(), max.data(),
         [](double const* /* min */, double const* /* max */, void const* item,
@@ -190,6 +210,19 @@ struct lookup {
         &fn);
   }
 
+  hash_set<node_idx_t> find_elevators(geo::latlng const& a,
+                                      geo::latlng const& b) const {
+    auto elevators = hash_set<node_idx_t>{};
+    find(a, b, [&](way_idx_t const way) {
+      for (auto const n : ways_.r_->way_nodes_[way]) {
+        if (ways_.r_->node_properties_[n].is_elevator()) {
+          elevators.emplace(n);
+        }
+      }
+    });
+    return elevators;
+  }
+
   void insert(way_idx_t const way) {
     auto b = osmium::Box{};
     for (auto const& c : ways_.way_polylines_[way]) {
@@ -197,9 +230,9 @@ struct lookup {
     }
 
     auto const min_corner =
-        std::array<double, 2U>{b.bottom_left().lon(), b.bottom_left().lat()};
+        std::array{b.bottom_left().lon(), b.bottom_left().lat()};
     auto const max_corner =
-        std::array<double, 2U>{b.top_right().lon(), b.top_right().lat()};
+        std::array{b.top_right().lon(), b.top_right().lat()};
 
     rtree_insert(
         rtree_, min_corner.data(), max_corner.data(),

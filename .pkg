@@ -17,7 +17,7 @@
 [cista]
   url=git@github.com:felixguendling/cista.git
   branch=master
-  commit=ebd5eb5cc7f82c414d3e060a3937d497189a103f
+  commit=bcabd041ddf07baf1b544bbe46ef195c2b6d22bd
 [googletest]
   url=git@github.com:motis-project/googletest.git
   branch=master
@@ -25,7 +25,7 @@
 [utl]
   url=git@github.com:motis-project/utl.git
   branch=master
-  commit=4c1503afe58e209977d9a1e3db6a6b271a50c521
+  commit=80df7a6f1e2de4d290c48e9218d48eb9792b7289
 [protozero]
   url=git@github.com:motis-project/protozero.git
   branch=master

@@ -140,8 +140,11 @@ struct car {
     }
   }
 
-  template <direction SearchDir, typename Fn>
-  static void adjacent(ways::routing const& w, node const n, Fn&& fn) {
+  template <direction SearchDir, bool WithBlocked, typename Fn>
+  static void adjacent(ways::routing const& w,
+                       node const n,
+                       bitvec<node_idx_t> const* blocked,
+                       Fn&& fn) {
     auto way_pos = way_pos_t{0U};
     for (auto const [way, i] :
          utl::zip_unchecked(w.node_ways_[n.n_], w.node_in_way_idx_[n.n_])) {
@@ -149,6 +152,12 @@ struct car {
                               std::uint16_t const to) {
         // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
         auto const target_node = w.way_nodes_[way][to];
+        if constexpr (WithBlocked) {
+          if (blocked->test(target_node)) {
+            return;
+          }
+        }
+
         auto const target_node_prop = w.node_properties_[target_node];
         if (node_cost(target_node_prop) == kInfeasible) {
           return;

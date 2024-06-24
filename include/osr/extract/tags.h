@@ -40,8 +40,12 @@ struct tags {
           if (highway_ == "elevator") {
             is_elevator_ = true;
           }
+          if (highway_ == "bus_stop") {
+            is_platform_ = true;
+          }
           break;
         case cista::hash("level"): {
+          has_level_ = true;
           auto s = utl::cstr{t.value()};
           while (s) {
             auto l = 0.0F;
@@ -63,9 +67,13 @@ struct tags {
           is_destination_ |= motorcar_ == "destination";
           break;
         case cista::hash("barrier"): barrier_ = t.value(); break;
+        case cista::hash("platform_edge"): is_platform_ = true; break;
         case cista::hash("public_transport"):
-          is_platform_ |=
-              t.value() == "platform"sv || t.value() == "stop_area"sv;
+          switch (cista::hash(std::string_view{t.value()})) {
+            case cista::hash("platform"):
+            case cista::hash("stop_position"):
+            case cista::hash("stop_area"): is_platform_ = true;
+          }
           break;
         case cista::hash("vehicle"):
           switch (cista::hash(std::string_view{t.value()})) {
@@ -159,6 +167,7 @@ struct tags {
   bool is_entrance_{false};
 
   // https://wiki.openstreetmap.org/wiki/Key:level
+  bool has_level_{false};
   level_bits_t level_bits_{0U};
 };
 

@@ -37,8 +37,10 @@ struct dijkstra {
     return it != end(cost_) ? it->second.cost(n) : kInfeasible;
   }
 
-  template <direction SearchDir>
-  void run(ways::routing const& r, cost_t const max) {
+  template <direction SearchDir, bool WithBlocked>
+  void run(ways::routing const& r,
+           cost_t const max,
+           bitvec<node_idx_t> const* blocked) {
     while (!pq_.empty()) {
       auto l = pq_.pop();
       if (get_cost(l.get_node()) < l.cost()) {
@@ -46,8 +48,8 @@ struct dijkstra {
       }
 
       auto const curr = l.get_node();
-      Profile::template adjacent<SearchDir>(
-          r, curr,
+      Profile::template adjacent<SearchDir, WithBlocked>(
+          r, curr, blocked,
           [&](node const neighbor, std::uint32_t const cost, distance_t,
               way_idx_t, std::uint16_t, std::uint16_t) {
             auto const total = l.cost() + cost;
@@ -60,9 +62,19 @@ struct dijkstra {
     }
   }
 
-  void run(ways::routing const& r, cost_t const max, direction const dir) {
-    dir == direction::kForward ? run<direction::kForward>(r, max)
-                               : run<direction::kBackward>(r, max);
+  void run(ways::routing const& r,
+           cost_t const max,
+           bitvec<node_idx_t> const* blocked,
+           direction const dir) {
+    if (blocked == nullptr) {
+      dir == direction::kForward
+          ? run<direction::kForward, false>(r, max, blocked)
+          : run<direction::kBackward, false>(r, max, blocked);
+    } else {
+      dir == direction::kForward
+          ? run<direction::kForward, true>(r, max, blocked)
+          : run<direction::kBackward, true>(r, max, blocked);
+    }
   }
 
   dial<label, get_bucket> pq_{get_bucket{}};

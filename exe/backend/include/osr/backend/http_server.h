@@ -6,6 +6,7 @@
 #include "boost/asio/io_context.hpp"
 
 #include "osr/lookup.h"
+#include "osr/platforms.h"
 #include "osr/ways.h"
 
 namespace osr::backend {
@@ -14,6 +15,7 @@ struct http_server {
   http_server(boost::asio::io_context& ioc,
               boost::asio::io_context& thread_pool,
               ways const&,
+              platforms const*,
               lookup const&,
               std::string const& static_file_path);
   ~http_server();

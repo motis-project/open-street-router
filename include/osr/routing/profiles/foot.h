@@ -111,13 +111,22 @@ struct foot {
     }
   }
 
-  template <direction SearchDir, typename Fn>
-  static void adjacent(ways::routing const& w, node const n, Fn&& fn) {
+  template <direction SearchDir, bool WithBlocked, typename Fn>
+  static void adjacent(ways::routing const& w,
+                       node const n,
+                       bitvec<node_idx_t> const* blocked,
+                       Fn&& fn) {
     for (auto const [way, i] :
          utl::zip_unchecked(w.node_ways_[n.n_], w.node_in_way_idx_[n.n_])) {
       auto const expand = [&](direction const way_dir, std::uint16_t const from,
                               std::uint16_t const to) {
         auto const target_node = w.way_nodes_[way][to];
+        if constexpr (WithBlocked) {
+          if (blocked->test(target_node)) {
+            return;
+          }
+        }
+
         auto const target_node_prop = w.node_properties_[target_node];
         if (node_cost(target_node_prop) == kInfeasible) {
           return;
@@ -134,7 +143,8 @@ struct foot {
                 auto const dist = w.way_node_dist_[way][std::min(from, to)];
                 auto const cost = way_cost(target_way_prop, way_dir, dist) +
                                   node_cost(target_node_prop);
-                fn(node{target_node, target_lvl}, cost, dist, way, from, to);
+                fn(node{target_node, target_lvl},
+                   static_cast<std::uint32_t>(cost), dist, way, from, to);
               });
         } else {
           auto const target_lvl = get_target_level(w, n.n_, n.lvl_, way);
@@ -145,7 +155,8 @@ struct foot {
           auto const dist = w.way_node_dist_[way][std::min(from, to)];
           auto const cost = way_cost(target_way_prop, way_dir, dist) +
                             node_cost(target_node_prop);
-          fn(node{target_node, *target_lvl}, cost, dist, way, from, to);
+          fn(node{target_node, *target_lvl}, static_cast<std::uint32_t>(cost),
+             dist, way, from, to);
         }
       };
 

@@ -115,7 +115,6 @@ target_link_libraries(osr
         rtree
         unordered_dense
         boost-thread
-        rapidjson
 )
 
 # --- MAIN ---

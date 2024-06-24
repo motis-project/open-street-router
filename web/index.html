@@ -26,7 +26,7 @@
             width: 100%;
         }
 
-        #graph-toggle {
+        #graph-toggle, #platform-toggle {
             position: relative;
             top: 5px;
             left: 5px;
@@ -67,18 +67,6 @@
             font-size: 10pt;
         }
 
-        .active {
-            background: #8fff7b;
-        }
-
-        #graph-toggle:hover, .level:hover {
-            background: #EEE;
-        }
-
-        .active:hover {
-            background: #bdffb1;
-        }
-
         #profile, #direction {
             position: absolute;
             top: 5px;
@@ -87,6 +75,18 @@
             box-shadow: 0 1px 2px rgba(0, 0, 0, .1);
             text-align: center;
             text-decoration: none;
+        }
+
+        #graph-toggle:hover, .level:hover {
+            background: #EEE;
+        }
+
+        .active {
+            background: #8fff7b !important;
+        }
+
+        .active:hover {
+            background: #bdffb1 !important;
         }
 
         #direction {
@@ -114,6 +114,7 @@
 </head>
 <body>
 <a id="graph-toggle" href="#" onclick="toggleGraph()">G</a>
+<a id="platform-toggle" href="#" onclick="togglePlatforms()">P</a>
 <div id="levels"></div>
 <select id="profile" onchange="selectProfile(event)">
     <option value="foot" selected>foot</option>
@@ -172,7 +173,6 @@
 
     const toTable = (properties) => {
         var table = document.createElement("table");
-        table.classList.add("routing-graph", "properties");
         for (var key in properties) {
             var value = properties[key];
             var row = document.createElement("tr");
@@ -259,6 +259,22 @@
         return await response.json();
     };
 
+    const getPlatforms = async (bounds) => {
+        const response = await fetch(`${window.origin}/api/platforms`, {
+            method: 'POST',
+            mode: 'cors',
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                level: currentLevel,
+                waypoints: bounds.toArray().flat()
+            })
+        });
+        return await response.json();
+    };
+
     const getLevels = async (bounds) => {
         const response = await fetch(`${window.origin}/api/levels`, {
             method: 'POST',
@@ -275,15 +291,18 @@
     }
 
     let graph = false;
+    let platforms = false;
     let currentLevel = 0;
     const levelsDom = document.getElementById('levels');
     const setLevels = async (levels) => {
         if (levels.length === 0 && currentLevel !== 0) {
             currentLevel = 0;
             graph = false;
+            platforms = false;
             style(map, 0);
             await addRouting();
             await updateGraph();
+            await updatePlatforms();
         }
         levelsDom.innerHTML = '';
         levels.forEach(l => {
@@ -294,9 +313,11 @@
             levelLink.onclick = async () => {
                 currentLevel = l;
                 graph = false;
+                platforms = false;
                 style(map, l);
                 await addRouting();
                 await updateGraph();
+                await updatePlatforms();
             };
             levelsDom.appendChild(levelLink);
         })
@@ -360,6 +381,67 @@
         await updateLevels();
         await addRouting();
     });
+
+    const updatePlatforms = async () => {
+        if (!platformActive && platforms) {
+            platforms = false;
+            try {
+                platformToggle.classList.remove('active');
+                map.removeLayer('platform-way');
+                map.removeLayer('platform-node');
+                map.removeSource('platforms');
+            } catch (e) {
+                // ignore, already removed
+            }
+        } else if (platformActive && !platforms) {
+            platforms = true;
+            platformToggle.classList.add('active');
+            map.addSource('platforms', {
+                type: 'geojson',
+                data: await getPlatforms(map.getBounds())
+            });
+            map.addLayer({
+                'id': 'platform-way',
+                'type': 'line',
+                'source': 'platforms',
+                'filter': [
+                    'all',
+                    ['==', 'type', 'way'],
+                    [
+                        'any',
+                        ['!has', 'level'],
+                        ['==', 'level', currentLevel]
+                    ]
+                ],
+                'layout': {
+                    'line-join': 'round',
+                    'line-cap': 'round',
+                },
+                'paint': {
+                    'line-color': '#00d924',
+                    'line-width': 3
+                }
+            });
+            map.addLayer({
+                'id': 'platform-node',
+                'type': 'circle',
+                'source': 'platforms',
+                'filter': [
+                    'all',
+                    ['==', 'type', 'node'],
+                    [
+                        'any',
+                        ['!has', 'level'],
+                        ['==', 'level', currentLevel]
+                    ]
+                ],
+                'paint': {
+                    'circle-color': '#0700d9',
+                    'circle-radius': 5,
+                }
+            });
+        }
+    };
 
     const updateGraph = async () => {
         if (!graphActive && graph) {
@@ -453,6 +535,13 @@
         await updateGraph();
     }
 
+    const platformToggle = document.getElementById("platform-toggle");
+    let platformActive = false;
+    window.togglePlatforms = async () => {
+        platformActive = !platformActive;
+        await updatePlatforms();
+    }
+
     window.selectProfile = async (e) => {
         query.profile = e.target.value;
         map.getSource('path').setData(await getRoute());
@@ -467,10 +556,13 @@
         if (graphActive) {
             map.getSource('graph').setData(await getGraph(map.getBounds()));
         }
+        if (platformActive) {
+            map.getSource('platforms').setData(await getPlatforms(map.getBounds()));
+        }
         updateLevels();
     });
 
-    ['graph-node', 'graph-edge', 'graph-geometry'].forEach((layer) => {
+    ['graph-node', 'graph-edge', 'graph-geometry', 'platform-way', 'platform-node'].forEach((layer) => {
         map.on('click', layer, (e) => {
             new maplibregl.Popup()
                 .setLngLat(e.lngLat)

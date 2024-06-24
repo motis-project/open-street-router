@@ -7,14 +7,19 @@
 #include "utl/pipes/transform.h"
 #include "utl/pipes/vec.h"
 
+#include "osr/platforms.h"
 #include "osr/routing/profiles/foot.h"
 #include "osr/ways.h"
 
 namespace osr {
 
-boost::json::array to_array(point const& p) { return {p.lng(), p.lat()}; }
+inline boost::json::array to_array(point const& p) {
+  return {p.lng(), p.lat()};
+}
 
-boost::json::array to_array(geo::latlng const& p) { return {p.lng(), p.lat()}; }
+inline boost::json::array to_array(geo::latlng const& p) {
+  return {p.lng(), p.lat()};
+}
 
 template <typename Collection>
 boost::json::value to_line_string(Collection const& line) {
@@ -25,11 +30,45 @@ boost::json::value to_line_string(Collection const& line) {
   return {{"type", "LineString"}, {"coordinates", x}};
 }
 
-boost::json::value to_point(point const& p) {
+template <typename T>
+boost::json::value to_line_string(std::initializer_list<T>&& line) {
+  return to_line_string(line);
+}
+
+inline boost::json::value to_point(point const& p) {
   return {{"type", "Point"}, {"coordinates", to_array(p)}};
 }
 
+inline std::string platform_names(platforms const& pl, platform_idx_t const i) {
+  auto names = std::stringstream{};
+  for (auto j = 0U; j != pl.platform_names_[i].size(); ++j) {
+    names << pl.platform_names_.at(i, j).view() << "\n";
+  }
+  return names.str();
+}
+
 struct geojson_writer {
+  void write_platform(platform_idx_t const i) {
+    for (auto const r : platforms_->platform_ref_[i]) {
+      auto const geometry = std::visit(
+          utl::overloaded{[&](node_idx_t x) {
+                            return to_point(platforms_->get_node_pos(x));
+                          },
+                          [&](way_idx_t x) {
+                            return to_line_string(w_.way_polylines_[x]);
+                          }},
+          to_ref(r));
+      features_.emplace_back(boost::json::value{
+          {"type", "Feature"},
+          {"properties",
+           {{"type", is_way(r) ? "way" : "node"},
+            {"platform_idx", to_idx(i)},
+            {"level", to_float(platforms_->get_level(w_, i))},
+            {"names", platform_names(*platforms_, i)}}},
+          {"geometry", geometry}});
+    }
+  }
+
   void write_way(way_idx_t const i) {
     auto const nodes = w_.r_->way_nodes_[i];
     auto const way_nodes = utl::nwise<2>(nodes);
@@ -85,14 +124,14 @@ struct geojson_writer {
   }
 
   template <typename Dijkstra>
-  std::string finish(Dijkstra const& s) {
+  void finish(Dijkstra const* s) {
     for (auto const n : nodes_) {
       auto const p = w_.r_->node_properties_[n];
 
       auto ss = std::stringstream{};
       Dijkstra::profile_t::resolve_all(*w_.r_, n, level_t::invalid(),
                                        [&](auto const n) {
-                                         auto const cost = s.get_cost(n);
+                                         auto const cost = s->get_cost(n);
                                          if (cost != kInfeasible) {
                                            ss << "{";
                                            n.print(ss, w_);
@@ -135,12 +174,20 @@ struct geojson_writer {
            {{"type", "Point"},
             {"coordinates", to_array(w_.get_node_pos(n))}}}});
     }
+  }
 
+  std::string string() {
     return boost::json::serialize(boost::json::value{
         {"type", "FeatureCollection"}, {"features", features_}});
   }
 
+  boost::json::value json() {
+    return boost::json::value{{"type", "FeatureCollection"},
+                              {"features", features_}};
+  }
+
   ways const& w_;
+  platforms const* platforms_{nullptr};
   boost::json::array features_;
   hash_set<node_idx_t> nodes_;
 };
